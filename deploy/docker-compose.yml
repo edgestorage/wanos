@@ -1,0 +1,94 @@
+services:
+  server:
+    image: huadream/wanos:latest
+    container_name: wanos-server
+    command: [
+      "--role","center",
+      "--s3-listen-addr",":9000",
+      "--internal-listen-addr",":9001"
+    ]
+    environment:
+      - DB_TYPE=${DB_TYPE:-sqlite}
+      - DB_DSN=${DB_DSN:-/data/wanos.db}
+      - ADMIN_USER=${ADMIN_USER:-admin}
+      - ADMIN_PASS=${ADMIN_PASS:-changeme}
+      - SESSION_SECRET=${SESSION_SECRET:-dev-secret}
+      - SESSION_TTL_SECONDS=${SESSION_TTL_SECONDS:-43200}
+      - HOST_STYLE=${HOST_STYLE:-}
+      # Pyroscope (Internal Profiling)
+      - PYRO_URL=${PYRO_URL:-}
+      - PYRO_AUTH_USER=${PYRO_AUTH_USER:-}
+      - PYRO_AUTH_PASS=${PYRO_AUTH_PASS:-}
+      # OpenTelemetry (Optional)
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      # OIDC (optional)
+      - OIDC_ISSUER=${OIDC_ISSUER:-}
+      - OIDC_CLIENT_ID=${OIDC_CLIENT_ID:-}
+      - OIDC_CLIENT_SECRET=${OIDC_CLIENT_SECRET:-}
+      - OIDC_REDIRECT_URL=${OIDC_REDIRECT_URL:-}
+      - OIDC_SCOPES=${OIDC_SCOPES:-}
+      - AKSK_SECRET_KEY=${AKSK_SECRET_KEY:-}
+    volumes:
+      - ./data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+      - "9002:9002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
+    restart: unless-stopped
+
+  console:
+    image: huadream/wanos-console:latest
+    container_name: wanos-console
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_API_BASE=http://server:9001
+    ports:
+      - "3000:3000"
+    depends_on:
+      - server
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: wanos-caddy
+    profiles: ["caddy"]
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN=${DOMAIN:-localhost}
+      - TLS_MODE=${TLS_MODE:-internal}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - server
+      - console
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: wanos-postgres
+    profiles: ["postgres"]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-wanos}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-wanos}
+      POSTGRES_DB: ${POSTGRES_DB:-wanos}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-wanos} -d ${POSTGRES_DB:-wanos}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:
